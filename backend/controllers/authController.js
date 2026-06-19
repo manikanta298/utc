@@ -195,7 +195,7 @@ const forgotPassword = async (req, res) => {
     user.resetPasswordExpire = new Date(expires);
     await user.save({ validateBeforeSave: false });
 
-    const FRONTEND = (process.env.FRONTEND_URL || 'https://utc-cafe.vercel.app').split(',')[0].trim();
+    const FRONTEND = (process.env.FRONTEND_URL || 'http://localhost:5173').split(',')[0].trim();
     const resetUrl = `${FRONTEND}/reset-password?token=${token}`;
 
     try {

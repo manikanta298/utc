@@ -3,7 +3,7 @@ import axios from 'axios';
 const API_ROOT = '/api';
 
 const normalizeBackendUrl = (url) => {
-  const trimmed = (url || 'https://utc-cafe.onrender.com').replace(/\/+$/, '');
+  const trimmed = (url || 'http://localhost:5000').replace(/\/+$/, '');
   return trimmed.endsWith(API_ROOT) ? trimmed : `${trimmed}${API_ROOT}`;
 };
 

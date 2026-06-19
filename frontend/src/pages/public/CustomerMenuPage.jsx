@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
-const API = import.meta.env.VITE_API_URL || 'https://utc-cafe.onrender.com/api';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 const apiFetch = (path, opts = {}) => fetch(`${API}${path}`, opts).then((r) => r.json());
 const apiPost = (path, body) => apiFetch(path, {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

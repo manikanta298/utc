@@ -26,7 +26,7 @@ const getTables = async (req, res) => {
 
 // Helper: build the correct menu URL for a table QR
 const buildMenuUrl = (franchiseId, tableNumber) => {
-  const origin = process.env.FRONTEND_URL || 'https://utc-cafe.vercel.app';
+  const origin = process.env.FRONTEND_URL || 'http://localhost:5173';
   return `${origin}/menu/${franchiseId}?table=${encodeURIComponent(tableNumber)}`;
 };
 

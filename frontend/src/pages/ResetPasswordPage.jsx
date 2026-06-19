@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 
-const API = import.meta.env.VITE_API_URL || 'https://utc-cafe.onrender.com/api';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();

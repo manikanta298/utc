@@ -23,7 +23,7 @@ export default function ThermalReceipt({ session, franchise, onClose, printerWid
   const [upiExpiry, setUpiExpiry] = useState(null);   // timestamp
   const [upiSecsLeft, setUpiSecsLeft] = useState(600); // 10 min countdown
 
-  const API = import.meta.env.VITE_API_URL || 'https://utc-cafe.onrender.com/api';
+  const API = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
   // Extract plain string ID — session.franchiseId may be a populated Mongoose object
   const franchiseId = (
     session?.franchiseId?._id ||

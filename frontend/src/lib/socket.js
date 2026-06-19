@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 
-const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || 'https://utc-cafe.onrender.com')
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000')
   .replace(/\/api\/?$/, '').replace(/\/$/, '');
 
 let socket = null;
