@@ -1,31 +1,70 @@
-const mongoose = require('mongoose');
+const { db, admin } = require('../config/firebase');
 
-const menuItemSchema = new mongoose.Schema(
-  {
-    name: { type: String, required: true, trim: true },
-    description: { type: String, trim: true, default: '' },
-    category: { type: String, required: true, trim: true }, // dynamic — managed via Category model
-    price: { type: Number, required: true, min: 0 },
-    gst_rate: { type: Number, required: true, default: 5 },
-    hsn_code: { type: String, trim: true, default: '' },
-    image: {
-      url: { type: String, default: '' },
-      public_id: { type: String, default: '' },
-    },
-    isGlobalActive: { type: Boolean, default: true },
-    disabledInFranchises: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Franchise' }],
-    preparationTime: { type: Number, default: 10 },
-    isVeg: { type: Boolean, default: true },
-    sortOrder: { type: Number, default: 0 },
-    // ── Inventory / Stock fields ───────────────────────────────
-    stock_enabled:    { type: Boolean, default: false },
-    stock_qty:        { type: Number, default: 0, min: 0 },
-    unit:             { type: String, default: 'pcs', trim: true }, // pcs, kg, litre, plate, box…
-    low_stock_threshold: { type: Number, default: 10 },
-  },
-  { timestamps: true }
-);
+const COLLECTION = 'menuItems';
+const ref = db.collection(COLLECTION);
 
-menuItemSchema.index({ category: 1, isGlobalActive: 1 });
+// Fields and defaults that Mongoose used to enforce via schema. Firestore is
+// schemaless, so defaults/validation now live here instead of in a schema file.
+const DEFAULTS = {
+  description: '',
+  hsn_code: '',
+  image: { object_path: '' },
+  isGlobalActive: true,
+  disabledInFranchises: [],
+  preparationTime: 10,
+  isVeg: true,
+  sortOrder: 0,
+  stock_enabled: false,
+  stock_qty: 0,
+  unit: 'pcs',
+  low_stock_threshold: 10,
+};
 
-module.exports = mongoose.model('MenuItem', menuItemSchema);
+function serialize(doc) {
+  return { id: doc.id, _id: doc.id, ...doc.data() };
+}
+
+/**
+ * Mongoose-style find(filter). Supports equality filters only — Firestore
+ * `.where()` doesn't support the regex/$or-style queries Mongo allowed, so
+ * any such usage elsewhere will need bespoke handling when it's migrated.
+ */
+async function find(filter = {}) {
+  let query = ref;
+  for (const [key, value] of Object.entries(filter)) {
+    if (value !== undefined) query = query.where(key, '==', value);
+  }
+  const snap = await query.get();
+  return snap.docs.map(serialize);
+}
+
+async function findById(id) {
+  if (!id) return null;
+  const doc = await ref.doc(id).get();
+  return doc.exists ? serialize(doc) : null;
+}
+
+async function create(data) {
+  const payload = {
+    ...DEFAULTS,
+    ...data,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+  const docRef = await ref.add(payload);
+  return findById(docRef.id);
+}
+
+async function updateById(id, updates) {
+  await ref.doc(id).update({
+    ...updates,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  return findById(id);
+}
+
+async function deleteById(id) {
+  await ref.doc(id).delete();
+}
+
+module.exports = { find, findById, create, updateById, deleteById, ref };
