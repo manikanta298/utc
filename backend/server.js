@@ -94,7 +94,7 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", 'data:', 'https://storage.googleapis.com'],
+      imgSrc: ["'self'", 'data:', 'https://res.cloudinary.com'],
       connectSrc: ["'self'", ...allowedOrigins],
       frameSrc: ["'none'"],
       objectSrc: ["'none'"],

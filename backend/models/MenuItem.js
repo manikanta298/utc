@@ -8,7 +8,7 @@ const ref = db.collection(COLLECTION);
 const DEFAULTS = {
   description: '',
   hsn_code: '',
-  image: { object_path: '' },
+  image: { url: '', public_id: '' },
   isGlobalActive: true,
   disabledInFranchises: [],
   preparationTime: 10,

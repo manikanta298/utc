@@ -1,5 +1,5 @@
 const MenuItem = require('../models/MenuItem');
-const { uploadMenuImage, saveMenuImage, deleteImage, withSignedUrl, withSignedUrls } = require('../utils/gcsUpload');
+const { uploadMenuImage, deleteImage } = require('../utils/cloudinary');
 
 // @GET /api/menu  — All menu items (filtered by franchise availability)
 const getMenu = async (req, res) => {
@@ -17,7 +17,6 @@ const getMenu = async (req, res) => {
       items = items.filter((item) => !(item.disabledInFranchises || []).map(String).includes(fId));
     }
 
-    items = await withSignedUrls(items);
     res.json({ success: true, items });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -30,7 +29,6 @@ const getAllMenu = async (req, res) => {
     const filter = req.user.role === 'master_admin' ? {} : { isGlobalActive: true };
     let items = await MenuItem.find(filter);
     items.sort((a, b) => a.category.localeCompare(b.category) || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
-    items = await withSignedUrls(items);
     res.json({ success: true, items });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -45,11 +43,13 @@ const createMenuItem = async (req, res) => {
       const { name, description, category, price, gst_rate, hsn_code, isVeg,
               preparationTime, isGlobalActive, sortOrder, stock_enabled, stock_qty, unit, low_stock_threshold } = req.body;
 
+      // multer-storage-cloudinary already uploaded the file by this point —
+      // req.file.path is the hosted Cloudinary URL, req.file.filename is the public_id
       const imageData = req.file
-        ? await saveMenuImage(req.file.buffer, req.file.originalname)
-        : { object_path: '' };
+        ? { url: req.file.path, public_id: req.file.filename }
+        : { url: '', public_id: '' };
 
-      let item = await MenuItem.create({
+      const item = await MenuItem.create({
         name, description, category,
         price: Number(price),
         gst_rate: Number(gst_rate),
@@ -64,7 +64,6 @@ const createMenuItem = async (req, res) => {
         unit: unit || 'pcs',
         low_stock_threshold: Number(low_stock_threshold) || 10,
       });
-      item = await withSignedUrl(item);
       res.status(201).json({ success: true, item });
     } catch (e) {
       res.status(500).json({ success: false, message: e.message });
@@ -101,13 +100,12 @@ const updateMenuItem = async (req, res) => {
       if (low_stock_threshold !== undefined) updates.low_stock_threshold = Number(low_stock_threshold);
 
       if (req.file) {
-        // Delete old image from GCS, then upload the new one
-        if (existing.image?.object_path) await deleteImage(existing.image.object_path);
-        updates.image = await saveMenuImage(req.file.buffer, req.file.originalname);
+        // Delete old Cloudinary asset, then point at the newly uploaded one
+        if (existing.image?.public_id) await deleteImage(existing.image.public_id);
+        updates.image = { url: req.file.path, public_id: req.file.filename };
       }
 
-      let item = await MenuItem.updateById(req.params.id, updates);
-      item = await withSignedUrl(item);
+      const item = await MenuItem.updateById(req.params.id, updates);
 
       const io = req.app.get('io');
       if (io) { io.emit('menu:globalUpdate', { itemId: item._id, isGlobalActive: item.isGlobalActive, item }); }
@@ -123,7 +121,7 @@ const deleteMenuItem = async (req, res) => {
   try {
     const item = await MenuItem.findById(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
-    if (item.image?.object_path) await deleteImage(item.image.object_path);
+    if (item.image?.public_id) await deleteImage(item.image.public_id);
     await MenuItem.deleteById(req.params.id);
     res.json({ success: true, message: 'Item deleted' });
   } catch (err) {
@@ -146,8 +144,7 @@ const toggleFranchiseItem = async (req, res) => {
       disabled.splice(idx, 1); // enable
     }
 
-    let item = await MenuItem.updateById(req.params.id, { disabledInFranchises: disabled });
-    item = await withSignedUrl(item);
+    const item = await MenuItem.updateById(req.params.id, { disabledInFranchises: disabled });
     const isEnabled = !disabled.includes(franchiseId);
 
     const io = req.app.get('io');
@@ -168,8 +165,7 @@ const toggleGlobalActive = async (req, res) => {
     const existing = await MenuItem.findById(req.params.id);
     if (!existing) return res.status(404).json({ success: false, message: 'Item not found' });
 
-    let item = await MenuItem.updateById(req.params.id, { isGlobalActive: !existing.isGlobalActive });
-    item = await withSignedUrl(item);
+    const item = await MenuItem.updateById(req.params.id, { isGlobalActive: !existing.isGlobalActive });
 
     const io = req.app.get('io');
     if (io) io.emit('menu:globalUpdate', { itemId: item._id, isGlobalActive: item.isGlobalActive, item });
