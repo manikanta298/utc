@@ -2,7 +2,6 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
-require('./config/firebase'); // initializes Firestore — used by migrated modules (menu items, for now)
 const cors = require('cors');
 const morgan = require('morgan');
 const helmet = require('helmet');
@@ -10,6 +9,8 @@ const rateLimit = require('express-rate-limit');
 const compression = require('compression');
 require('dotenv').config();
 const Order = require('./models/Order');
+const cron = require('node-cron');
+const { initSchema, watchOrderTracking, syncCustomersBatch } = require('./utils/cockroachSync');
 const { mongoSanitize, preventParamPollution, securityHeaders } = require('./middleware/security');
 
 // ── SECURITY: Fail fast if critical env vars are missing
@@ -330,6 +331,16 @@ mongoose
       { createdAt: { $lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }, archivedAt: null },
       { $set: { archivedAt: new Date() } }
     ).catch((err) => console.error('Order archive backfill failed:', err.message));
+
+    // ── CockroachDB: downstream sync, never blocks MongoDB/app startup
+    try {
+      await initSchema();
+      watchOrderTracking();
+      cron.schedule('*/5 * * * *', syncCustomersBatch); // every 5 minutes
+      syncCustomersBatch(); // also run once at startup
+    } catch (err) {
+      console.error('[CockroachDB] setup failed (app continues on MongoDB regardless):', err.message);
+    }
 
     server.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`));
   })

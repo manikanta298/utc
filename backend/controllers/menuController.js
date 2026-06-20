@@ -8,13 +8,12 @@ const getMenu = async (req, res) => {
     const filter = { isGlobalActive: true };
     if (category) filter.category = category;
 
-    let items = await MenuItem.find(filter);
-    items.sort((a, b) => a.category.localeCompare(b.category) || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+    let items = await MenuItem.find(filter).sort({ category: 1, sortOrder: 1, name: 1 });
 
     // Filter out items disabled at this franchise
     const fId = franchiseId || (req.user?.franchise_id?._id || req.user?.franchise_id)?.toString();
     if (fId) {
-      items = items.filter((item) => !(item.disabledInFranchises || []).map(String).includes(fId));
+      items = items.filter((item) => !item.disabledInFranchises.map(String).includes(fId));
     }
 
     res.json({ success: true, items });
@@ -27,8 +26,7 @@ const getMenu = async (req, res) => {
 const getAllMenu = async (req, res) => {
   try {
     const filter = req.user.role === 'master_admin' ? {} : { isGlobalActive: true };
-    let items = await MenuItem.find(filter);
-    items.sort((a, b) => a.category.localeCompare(b.category) || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+    const items = await MenuItem.find(filter).sort({ category: 1, sortOrder: 1, name: 1 });
     res.json({ success: true, items });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -42,9 +40,6 @@ const createMenuItem = async (req, res) => {
     try {
       const { name, description, category, price, gst_rate, hsn_code, isVeg,
               preparationTime, isGlobalActive, sortOrder, stock_enabled, stock_qty, unit, low_stock_threshold } = req.body;
-
-      // multer-storage-cloudinary already uploaded the file by this point —
-      // req.file.path is the hosted Cloudinary URL, req.file.filename is the public_id
       const imageData = req.file
         ? { url: req.file.path, public_id: req.file.filename }
         : { url: '', public_id: '' };
@@ -76,37 +71,35 @@ const updateMenuItem = async (req, res) => {
   uploadMenuImage(req, res, async (err) => {
     if (err) return res.status(400).json({ success: false, message: err.message });
     try {
-      const existing = await MenuItem.findById(req.params.id);
-      if (!existing) return res.status(404).json({ success: false, message: 'Item not found' });
+      const item = await MenuItem.findById(req.params.id);
+      if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
 
       const { name, description, category, price, gst_rate, hsn_code, isVeg,
               preparationTime, isGlobalActive, sortOrder,
               stock_enabled, stock_qty, unit, low_stock_threshold } = req.body;
 
-      const updates = {};
-      if (name !== undefined) updates.name = name;
-      if (description !== undefined) updates.description = description;
-      if (category !== undefined) updates.category = category;
-      if (price !== undefined) updates.price = Number(price);
-      if (gst_rate !== undefined) updates.gst_rate = Number(gst_rate);
-      if (hsn_code !== undefined) updates.hsn_code = hsn_code;
-      if (isVeg !== undefined) updates.isVeg = isVeg !== 'false';
-      if (preparationTime !== undefined) updates.preparationTime = Number(preparationTime);
-      if (isGlobalActive !== undefined) updates.isGlobalActive = isGlobalActive === 'true' || isGlobalActive === true;
-      if (sortOrder !== undefined) updates.sortOrder = Number(sortOrder);
-      if (stock_enabled !== undefined) updates.stock_enabled = stock_enabled === 'true' || stock_enabled === true;
-      if (stock_qty !== undefined) updates.stock_qty = Math.max(0, Number(stock_qty));
-      if (unit !== undefined) updates.unit = unit;
-      if (low_stock_threshold !== undefined) updates.low_stock_threshold = Number(low_stock_threshold);
+      if (name !== undefined) item.name = name;
+      if (description !== undefined) item.description = description;
+      if (category !== undefined) item.category = category;
+      if (price !== undefined) item.price = Number(price);
+      if (gst_rate !== undefined) item.gst_rate = Number(gst_rate);
+      if (hsn_code !== undefined) item.hsn_code = hsn_code;
+      if (isVeg !== undefined) item.isVeg = isVeg !== 'false';
+      if (preparationTime !== undefined) item.preparationTime = Number(preparationTime);
+      if (isGlobalActive !== undefined) item.isGlobalActive = isGlobalActive === 'true' || isGlobalActive === true;
+      if (sortOrder !== undefined) item.sortOrder = Number(sortOrder);
+      if (stock_enabled !== undefined) item.stock_enabled = stock_enabled === 'true' || stock_enabled === true;
+      if (stock_qty !== undefined) item.stock_qty = Math.max(0, Number(stock_qty));
+      if (unit !== undefined) item.unit = unit;
+      if (low_stock_threshold !== undefined) item.low_stock_threshold = Number(low_stock_threshold);
 
       if (req.file) {
-        // Delete old Cloudinary asset, then point at the newly uploaded one
-        if (existing.image?.public_id) await deleteImage(existing.image.public_id);
-        updates.image = { url: req.file.path, public_id: req.file.filename };
+        // Delete old image from Cloudinary
+        if (item.image?.public_id) await deleteImage(item.image.public_id);
+        item.image = { url: req.file.path, public_id: req.file.filename };
       }
 
-      const item = await MenuItem.updateById(req.params.id, updates);
-
+      await item.save();
       const io = req.app.get('io');
       if (io) { io.emit('menu:globalUpdate', { itemId: item._id, isGlobalActive: item.isGlobalActive, item }); }
       res.json({ success: true, item });
@@ -122,7 +115,7 @@ const deleteMenuItem = async (req, res) => {
     const item = await MenuItem.findById(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
     if (item.image?.public_id) await deleteImage(item.image.public_id);
-    await MenuItem.deleteById(req.params.id);
+    await item.deleteOne();
     res.json({ success: true, message: 'Item deleted' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -133,20 +126,17 @@ const deleteMenuItem = async (req, res) => {
 const toggleFranchiseItem = async (req, res) => {
   try {
     const franchiseId = (req.user.franchise_id._id || req.user.franchise_id).toString();
-    const existing = await MenuItem.findById(req.params.id);
-    if (!existing) return res.status(404).json({ success: false, message: 'Item not found' });
+    const item = await MenuItem.findById(req.params.id);
+    if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
 
-    const disabled = (existing.disabledInFranchises || []).map(String);
-    const idx = disabled.indexOf(franchiseId);
+    const idx = item.disabledInFranchises.map(String).indexOf(franchiseId);
     if (idx === -1) {
-      disabled.push(franchiseId); // disable
+      item.disabledInFranchises.push(franchiseId); // disable
     } else {
-      disabled.splice(idx, 1); // enable
+      item.disabledInFranchises.splice(idx, 1); // enable
     }
-
-    const item = await MenuItem.updateById(req.params.id, { disabledInFranchises: disabled });
-    const isEnabled = !disabled.includes(franchiseId);
-
+    await item.save();
+    const isEnabled = !item.disabledInFranchises.map(String).includes(franchiseId);
     const io = req.app.get('io');
     io.to(`franchise:${franchiseId}`).to(`pos:${franchiseId}`).emit('menu:availability', {
       itemId: item._id,
@@ -162,11 +152,10 @@ const toggleFranchiseItem = async (req, res) => {
 // PATCH /menu/:id/global-toggle — master admin quick active/inactive flip
 const toggleGlobalActive = async (req, res) => {
   try {
-    const existing = await MenuItem.findById(req.params.id);
-    if (!existing) return res.status(404).json({ success: false, message: 'Item not found' });
-
-    const item = await MenuItem.updateById(req.params.id, { isGlobalActive: !existing.isGlobalActive });
-
+    const item = await MenuItem.findById(req.params.id);
+    if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
+    item.isGlobalActive = !item.isGlobalActive;
+    await item.save();
     const io = req.app.get('io');
     if (io) io.emit('menu:globalUpdate', { itemId: item._id, isGlobalActive: item.isGlobalActive, item });
     res.json({ success: true, item, isGlobalActive: item.isGlobalActive });
