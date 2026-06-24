@@ -8,6 +8,7 @@ const Invoice = require('../models/Invoice');
 const Counter = require('../models/Counter');
 const { generateToken, generateSessionRef } = require('../utils/tokenGenerator');
 const { determineTaxType, calculateOrderTax } = require('../utils/gst');
+const { derivePaymentStatus } = require('../services/paymentService');
 
 // POST /api/sessions/start — Start or resume a session
 const startSession = async (req, res) => {
@@ -439,10 +440,10 @@ const recordPayment = async (req, res) => {
     // ── 3. Record payment ─────────────────────────────────────────
     session.payments.push({ amount: parsedAmount, method: method || 'Cash', reference: reference || '', receivedBy: req.user._id });
     session.paidAmount = +(session.paidAmount + parsedAmount).toFixed(2);
-    const balance = +(session.totalAmount - session.paidAmount).toFixed(2);
+    const { paymentStatus, isFullyPaid, balance } = derivePaymentStatus(session.paidAmount, session.totalAmount);
+    session.paymentStatus = paymentStatus;
 
-    if (session.paidAmount >= session.totalAmount) {
-      session.paymentStatus = 'fully_paid';
+    if (isFullyPaid) {
       session.status = 'paid';
       session.closedAt = new Date();
 
@@ -540,9 +541,6 @@ const recordPayment = async (req, res) => {
         });
         ioC.to(`pos:${_fidStr}`).emit('session:paid', { sessionId: session._id.toString() });
       }
-
-    } else if (session.paidAmount > 0) {
-      session.paymentStatus = balance < 0 ? 'advance_paid' : 'partially_paid';
     }
 
     // ── 8. Save session ───────────────────────────────────────────
