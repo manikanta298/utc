@@ -22,6 +22,8 @@ const userSchema = new mongoose.Schema(
     // Waiter-specific: array of table numbers assigned to this waiter
     assigned_tables: [{ type: String }],
     lastLogin: { type: Date },
+    failedLoginAttempts: { type: Number, default: 0 },
+    lockUntil: { type: Date, default: null },
     resetPasswordToken:  { type: String },
     resetPasswordExpire: { type: Date },
   },

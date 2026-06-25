@@ -7,6 +7,13 @@ const {
   setRefreshTokenCookie,
   clearRefreshTokenCookie,
 } = require('../utils/tokenService');
+const {
+  isLocked,
+  lockRemainingMs,
+  logLoginAttempt,
+  recordFailedLogin,
+  recordSuccessfulLogin,
+} = require('../services/authSecurityService');
 
 const handleValidation = (req, res) => {
   const errors = validationResult(req);
@@ -35,23 +42,36 @@ const login = async (req, res) => {
       .populate('franchise_id', withUserFranchise);
 
     if (!user || !user.isActive) {
+      await logLoginAttempt({ email, user, success: false, reason: !user ? 'no_such_user' : 'inactive', ip: req.ip });
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    if (isLocked(user)) {
+      await logLoginAttempt({ email, user, success: false, reason: 'account_locked', ip: req.ip });
+      const minutesLeft = Math.ceil(lockRemainingMs(user) / 60000);
+      return res.status(423).json({
+        success: false,
+        message: `Account temporarily locked due to repeated failed login attempts. Try again in ${minutesLeft} minute(s).`,
+      });
     }
 
     if (user.franchise_id) {
       const franchiseStatus = user.franchise_id.status || (user.franchise_id.isActive ? 'active' : 'inactive');
       if (franchiseStatus !== 'active') {
+        await logLoginAttempt({ email, user, success: false, reason: 'franchise_inactive', ip: req.ip });
         return res.status(403).json({ success: false, message: 'Franchise is deactivated. Access denied.' });
       }
     }
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
+      await recordFailedLogin(user, req.ip);
+      await logLoginAttempt({ email, user, success: false, reason: 'wrong_password', ip: req.ip });
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
-    user.lastLogin = new Date();
-    await user.save({ validateBeforeSave: false });
+    await recordSuccessfulLogin(user);
+    await logLoginAttempt({ email, user, success: true, ip: req.ip });
 
     const token = signAccessToken(user._id);
     const refreshToken = signRefreshToken(user._id);

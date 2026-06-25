@@ -6,6 +6,7 @@ const Order = require('./models/Order');
 const cron = require('node-cron');
 const { initSchema, watchOrderTracking, syncCustomersBatch } = require('./utils/cockroachSync');
 const { processPendingJobs } = require('./services/jobQueueService');
+const { checkResourceThresholds } = require('./services/systemHealthService');
 const { createApp } = require('./app');
 
 // ── SECURITY: Fail fast if critical env vars are missing
@@ -187,6 +188,11 @@ mongoose
       processPendingJobs().catch((err) => console.error('[jobQueue] tick failed:', err.message));
     });
     processPendingJobs().catch((err) => console.error('[jobQueue] startup run failed:', err.message));
+
+    // ── Resource monitoring: memory + Mongo connection state, every 5 minutes
+    cron.schedule('*/5 * * * *', () => {
+      checkResourceThresholds().catch((err) => console.error('[systemHealth] check failed:', err.message));
+    });
 
     server.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`));
   })
