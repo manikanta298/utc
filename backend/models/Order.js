@@ -110,9 +110,12 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-orderSchema.index({ franchise_id: 1, createdAt: -1 });
-orderSchema.index({ customer_id: 1 });
-orderSchema.index({ kitchen_status: 1, franchise_id: 1 });
-orderSchema.index({ archivedAt: 1, createdAt: -1 });
+orderSchema.index({ franchise_id: 1, createdAt: -1 }); // includeArchived=true path (rare): no archivedAt filter
+orderSchema.index({ franchise_id: 1, archivedAt: 1, createdAt: -1 }); // the common path: buildOrderListFilter always sets archivedAt unless includeArchived=true
+orderSchema.index({ customer_id: 1, createdAt: -1 }); // getOrderHistory: sorted lookup by customer, supersedes a bare {customer_id:1}
+orderSchema.index({ franchise_id: 1, kitchen_status: 1 }); // was {kitchen_status:1, franchise_id:1} — wrong leading field.
+// franchise_id is in every franchise-scoped query (kitchen_status is optional), so a compound index
+// must lead with franchise_id to be usable when kitchen_status isn't part of the query at all.
+orderSchema.index({ archivedAt: 1, createdAt: -1 }); // archiveOldOrders global sweep — no franchise scoping needed there
 
 module.exports = mongoose.model('Order', orderSchema);

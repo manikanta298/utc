@@ -157,6 +157,9 @@ mongoose
       { col: 'ordersessions', name: 'tokenNumber_1' },
       { col: 'ordersessions', name: 'franchiseId_1_tokenNumber_1' },
       { col: 'ordersessions', name: 'franchiseId_tokenNumber_partial_unique' },
+      // Superseded by better-ordered/more precise compound indexes — see models/Order.js
+      { col: 'orders', name: 'kitchen_status_1_franchise_id_1' },
+      { col: 'orders', name: 'customer_id_1' },
     ];
     for (const { col, name } of legacyIndexes) {
       try {
