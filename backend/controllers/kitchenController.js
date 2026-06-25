@@ -1,5 +1,6 @@
 const Order = require('../models/Order');
 const { sendOrderAccepted, sendOrderPreparing, sendOrderReady } = require('../utils/sms');
+const { createOrderNotification } = require('../services/notificationService');
 
 const STATUS_FLOW = ['Pending', 'Accepted', 'Preparing', 'Ready', 'Delivered', 'Completed'];
 const TERMINAL_STATUSES = ['Cancelled'];
@@ -132,6 +133,16 @@ const updateKitchenStatus = async (req, res) => {
       if (status === 'Ready') {
         console.log(`[kitchen] emitting order:ready -> ${franchiseRoomName}, ${posRoomName}, ${waiterRoomName}`);
         franchiseBroadcast.emit('order:ready', payload);
+
+        createOrderNotification({
+          type: 'ready',
+          franchiseId: fid,
+          orderId: order._id,
+          tokenNumber: order.token_number,
+          tableNumber: order.table_number,
+          customerName: order.customer_id?.name,
+          orderType: order.order_type,
+        }).catch((e) => console.error('Notification persistence error:', e.message));
       }
       if (status === 'Delivered') {
         io.to(displayRoomName).emit('token:announce', {

@@ -131,6 +131,7 @@ function createApp({ io } = {}) {
   app.use('/api/payment-config', require('./routes/paymentConfig'));
   app.use('/api/audit', require('./routes/audit'));
   app.use('/api/token-sessions', require('./routes/tokenSessions'));
+  app.use('/api/notifications', require('./routes/notifications'));
 
   const publicLimiter = rateLimit({
     windowMs: 60 * 1000,

@@ -1,5 +1,6 @@
 const { sendOrderPlaced } = require('../utils/sms');
 const Order = require('../models/Order');
+const { createOrderNotification } = require('../services/notificationService');
 const {
   placeOrder,
   buildOrderListFilter,
@@ -55,6 +56,16 @@ const createOrder = async (req, res) => {
     const io = req.app.get('io');
     io.to(`franchise:${order.franchise_id}`).emit('order:new', populatedOrder);
     io.to('admin').emit('order:new', populatedOrder); // master admin live dashboard
+
+    createOrderNotification({
+      type: 'new_order',
+      franchiseId: order.franchise_id,
+      orderId: order._id,
+      tokenNumber: order.token_number,
+      tableNumber: order.table_number,
+      customerName: customer.name,
+      orderType: order.order_type,
+    }).catch((e) => console.error('Notification persistence error:', e.message));
 
     sendOrderPlaced(
       customer.phone_no,

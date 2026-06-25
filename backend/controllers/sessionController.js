@@ -1,5 +1,6 @@
 const OrderSession = require('../models/OrderSession');
 const Order = require('../models/Order');
+const { createOrderNotification } = require('../services/notificationService');
 const {
   startSessionFlow,
   addOrderToSessionFlow,
@@ -109,6 +110,16 @@ const addOrderToSession = async (req, res) => {
       if (destination === 'kitchen' || destination === 'both') {
         io.to(`franchise:${franchiseId}`).emit('order:new', kitchenPayload);
         io.to('admin').emit('order:new', kitchenPayload);
+
+        createOrderNotification({
+          type: 'new_order',
+          franchiseId,
+          orderId: order._id,
+          tokenNumber: session.tokenNumber,
+          tableNumber: session.tableNumber,
+          customerName: session.customerName,
+          orderType: session.orderType,
+        }).catch((e) => console.error('Notification persistence error:', e.message));
       }
       if (destination === 'counter' || destination === 'both') {
         io.to(`pos:${franchiseId}`).emit('order:counter', kitchenPayload);
