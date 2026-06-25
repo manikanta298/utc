@@ -5,6 +5,7 @@ require('dotenv').config();
 const Order = require('./models/Order');
 const cron = require('node-cron');
 const { initSchema, watchOrderTracking, syncCustomersBatch } = require('./utils/cockroachSync');
+const { processPendingJobs } = require('./services/jobQueueService');
 const { createApp } = require('./app');
 
 // ── SECURITY: Fail fast if critical env vars are missing
@@ -180,6 +181,12 @@ mongoose
     } catch (err) {
       console.error('[CockroachDB] setup failed (app continues on MongoDB regardless):', err.message);
     }
+
+    // ── Background job queue: SMS sending, retried with backoff on failure
+    cron.schedule('*/15 * * * * *', () => {
+      processPendingJobs().catch((err) => console.error('[jobQueue] tick failed:', err.message));
+    });
+    processPendingJobs().catch((err) => console.error('[jobQueue] startup run failed:', err.message));
 
     server.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`));
   })

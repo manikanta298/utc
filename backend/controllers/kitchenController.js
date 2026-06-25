@@ -1,6 +1,6 @@
 const Order = require('../models/Order');
-const { sendOrderAccepted, sendOrderPreparing, sendOrderReady } = require('../utils/sms');
 const { createOrderNotification } = require('../services/notificationService');
+const { enqueueJob } = require('../services/jobQueueService');
 
 const STATUS_FLOW = ['Pending', 'Accepted', 'Preparing', 'Ready', 'Delivered', 'Completed'];
 const TERMINAL_STATUSES = ['Cancelled'];
@@ -158,9 +158,9 @@ const updateKitchenStatus = async (req, res) => {
     const franchiseName = order.franchise_id?.name || 'UTC Cafe';
     const tokenNumber   = order.token_number;
     if (customerPhone) {
-      if (status === 'Accepted')  sendOrderAccepted(customerPhone, customerName, tokenNumber, franchiseName).catch(() => {});
-      if (status === 'Preparing') sendOrderPreparing(customerPhone, customerName, tokenNumber).catch(() => {});
-      if (status === 'Ready')     sendOrderReady(customerPhone, customerName, tokenNumber, franchiseName).catch(() => {});
+      if (status === 'Accepted')  enqueueJob('sms', { fn: 'sendOrderAccepted', args: [customerPhone, customerName, tokenNumber, franchiseName] }).catch(() => {});
+      if (status === 'Preparing') enqueueJob('sms', { fn: 'sendOrderPreparing', args: [customerPhone, customerName, tokenNumber] }).catch(() => {});
+      if (status === 'Ready')     enqueueJob('sms', { fn: 'sendOrderReady', args: [customerPhone, customerName, tokenNumber, franchiseName] }).catch(() => {});
     }
 
     res.json({ success: true, order, notification: NOTIFICATION_MESSAGES[status] || '', smsSent: !!customerPhone, alreadyUpdated });

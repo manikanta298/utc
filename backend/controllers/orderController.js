@@ -1,6 +1,6 @@
-const { sendOrderPlaced } = require('../utils/sms');
 const Order = require('../models/Order');
 const { createOrderNotification } = require('../services/notificationService');
+const { enqueueJob } = require('../services/jobQueueService');
 const {
   placeOrder,
   buildOrderListFilter,
@@ -67,14 +67,17 @@ const createOrder = async (req, res) => {
       orderType: order.order_type,
     }).catch((e) => console.error('Notification persistence error:', e.message));
 
-    sendOrderPlaced(
-      customer.phone_no,
-      customer.name,
-      order.order_number,
-      order.token_number,
-      populatedOrder.franchise_id?.name || '',
-      order.final_amount.toFixed(2)
-    ).catch((e) => console.error('SMS sendOrderPlaced error:', e.message));
+    enqueueJob('sms', {
+      fn: 'sendOrderPlaced',
+      args: [
+        customer.phone_no,
+        customer.name,
+        order.order_number,
+        order.token_number,
+        populatedOrder.franchise_id?.name || '',
+        order.final_amount.toFixed(2),
+      ],
+    }).catch((e) => console.error('Job enqueue error:', e.message));
 
     res.status(201).json({
       success: true,
