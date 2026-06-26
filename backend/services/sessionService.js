@@ -128,18 +128,15 @@ async function findOrCreateSessionCustomer(session, franchiseId) {
   return customer;
 }
 
-async function addOrderToSessionFlow({ sessionId, items, destination = 'kitchen', createdBy, waiterName, role }) {
-  const session = await OrderSession.findById(sessionId);
-  if (!session) fail(404, 'Session not found');
-  if (session.status === 'paid' || session.status === 'closed') fail(400, 'Session is already closed');
-  if (!Array.isArray(items) || items.length === 0) fail(400, 'Add at least one item before sending order');
-
-  const franchiseId = session.franchiseId;
-  const franchise = await Franchise.findById(franchiseId);
-  if (!franchise) fail(404, 'Franchise not found');
-
-  const builtItems = await buildSessionOrderItems(items, franchiseId);
-  const isAddition = session.subOrders.length > 0;
+/**
+ * Creates one Order document for a session from already-built items.
+ * Shared by addOrderToSessionFlow (POS/waiter adding items live) and
+ * approveWaiterOrderFlow (promoting a pending waiter order at approval
+ * time) — this is the ONE place that creates Order documents for a
+ * session, so both paths produce orders the kitchen can actually see.
+ */
+async function createOrderFromItems({ session, franchise, builtItems, createdBy, waiterName, role }) {
+  const franchiseId = franchise._id;
 
   const taxType = determineTaxType(franchise.state, franchise.state);
   const { subTotal, cgst, sgst, igst, totalTax, grossTotal } = calculateOrderTax(
@@ -194,6 +191,24 @@ async function addOrderToSessionFlow({ sessionId, items, destination = 'kitchen'
     status_history: [{ status: 'Pending', updatedBy: createdBy }],
   });
 
+  return order;
+}
+
+async function addOrderToSessionFlow({ sessionId, items, destination = 'kitchen', createdBy, waiterName, role }) {
+  const session = await OrderSession.findById(sessionId);
+  if (!session) fail(404, 'Session not found');
+  if (session.status === 'paid' || session.status === 'closed') fail(400, 'Session is already closed');
+  if (!Array.isArray(items) || items.length === 0) fail(400, 'Add at least one item before sending order');
+
+  const franchiseId = session.franchiseId;
+  const franchise = await Franchise.findById(franchiseId);
+  if (!franchise) fail(404, 'Franchise not found');
+
+  const builtItems = await buildSessionOrderItems(items, franchiseId);
+  const isAddition = session.subOrders.length > 0;
+
+  const order = await createOrderFromItems({ session, franchise, builtItems, createdBy, waiterName, role });
+
   session.subOrders.push({
     orderedAt: new Date(),
     isAddition,
@@ -204,7 +219,7 @@ async function addOrderToSessionFlow({ sessionId, items, destination = 'kitchen'
   });
   await session.save();
 
-  return { session, order, isAddition, builtItems, orderNumber, franchiseId, destination };
+  return { session, order, isAddition, builtItems, orderNumber: order.order_number, franchiseId, destination };
 }
 
 // ── getSession ───────────────────────────────────────────────────────────────
@@ -546,6 +561,66 @@ async function cancelSessionFlow(sessionId, reason) {
   return { session, tableId, franchiseId: session.franchiseId };
 }
 
+// ── approveWaiterOrder ───────────────────────────────────────────────────────
+/**
+ * Promotes a waiter-placed session's pending items into real Order
+ * documents — this is the fix for the gap where waiter orders never
+ * created an Order at all, so kitchen could never see them no matter
+ * what got approved. Idempotent: skips any subOrder that already has
+ * an order_id (so re-approving, or a session with multiple pending
+ * subOrders, never double-creates).
+ */
+async function approveWaiterOrderFlow({ sessionId, approvedBy }) {
+  const session = await OrderSession.findById(sessionId);
+  if (!session) fail(404, 'Session not found');
+
+  if (session.status === 'open') {
+    return { session, alreadyApproved: true, createdOrders: [] }; // idempotent re-approval
+  }
+  if (session.status !== 'pending_pos') {
+    fail(400, `Cannot approve session with status: ${session.status}`);
+  }
+
+  const franchise = await Franchise.findById(session.franchiseId);
+  if (!franchise) fail(404, 'Franchise not found');
+
+  const createdOrders = [];
+  for (const sub of session.subOrders) {
+    if (sub.order_id) continue; // already promoted
+
+    // sub.items are Mongoose subdocuments, not plain objects like buildSessionOrderItems
+    // produces — createOrderFromItems spreads items for the tax calc, which doesn't
+    // reliably enumerate Mongoose document fields. Normalize explicitly to be safe.
+    const builtItems = sub.items.map(i => ({
+      menuItemId: i.menuItemId,
+      name: i.name,
+      qty: i.qty,
+      unitPrice: i.unitPrice,
+      totalPrice: i.totalPrice,
+      gst_rate: i.gst_rate,
+      hsn_code: i.hsn_code || '',
+    }));
+
+    const order = await createOrderFromItems({
+      session,
+      franchise,
+      builtItems,
+      createdBy: sub.placedBy || approvedBy,
+      waiterName: '',
+      role: 'waiter',
+    });
+    sub.order_id = order._id;
+    createdOrders.push(order);
+  }
+
+  session.status = 'open';
+  session.approvedBy = approvedBy;
+  session.approvedAt = new Date();
+  await session.save();
+
+  return { session, alreadyApproved: false, createdOrders, franchiseId: session.franchiseId };
+}
+
 module.exports = {
   startSessionFlow,
   buildSessionOrderItems,
@@ -562,4 +637,5 @@ module.exports = {
   resumeSessionFlow,
   getHeldSessionsList,
   cancelSessionFlow,
+  approveWaiterOrderFlow,
 };

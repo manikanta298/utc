@@ -5,6 +5,8 @@ const Order        = require('../models/Order');
 const MenuItem     = require('../models/MenuItem');
 const Table        = require('../models/Table');
 const { generateToken, generateSessionRef } = require('../utils/tokenGenerator');
+const { approveWaiterOrderFlow } = require('../services/sessionService');
+const { createOrderNotification } = require('../services/notificationService');
 
 // ─────────────────────────────────────────────────────────────────
 // POST /api/waiter/place-order
@@ -112,38 +114,51 @@ const approveWaiterSession = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid session ID' });
     }
 
-    const session = await OrderSession.findById(req.params.id);
-    if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
+    const { session, alreadyApproved, createdOrders } = await approveWaiterOrderFlow({
+      sessionId: req.params.id,
+      approvedBy: req.user._id,
+    });
 
-    // Accept both pending_pos and open (idempotent — already approved)
-    if (session.status === 'open') {
+    if (alreadyApproved) {
       return res.json({ success: true, session, message: 'Session already approved' });
     }
-    if (session.status !== 'pending_pos') {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot approve session with status: ${session.status}`,
-      });
-    }
-
-    session.status     = 'open';
-    session.approvedBy = req.user._id;
-    session.approvedAt = new Date();
-    await session.save();
 
     const franchiseId = session.franchiseId?.toString();
     const io = req.app.get('io');
+
+    for (const order of createdOrders) {
+      const populatedOrder = await Order.findById(order._id)
+        .populate('customer_id', 'name phone_no')
+        .populate('franchise_id', 'name franchiseCode');
+
+      if (io) {
+        // Same event names the kitchen screen actually listens for — this was the
+        // core bug: the old code emitted 'kitchen:new_order', which nothing read.
+        io.to(`franchise:${franchiseId}`).emit('order:new', populatedOrder);
+        io.to('admin').emit('order:new', populatedOrder);
+      }
+
+      createOrderNotification({
+        type: 'new_order',
+        franchiseId,
+        orderId: order._id,
+        tokenNumber: session.tokenNumber,
+        tableNumber: session.tableNumber,
+        customerName: session.customerName,
+        orderType: session.orderType,
+      }).catch((e) => console.error('Notification persistence error:', e.message));
+    }
+
     if (io) {
       io.to(`franchise:${franchiseId}`).emit('waiter:order_approved', {
         sessionId:   session._id,
         tableNumber: session.tableNumber,
       });
-      io.to(`kitchen:${franchiseId}`).emit('kitchen:new_order', { session });
     }
 
     res.json({ success: true, session, message: 'Order approved and sent to kitchen' });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(err.status || 500).json({ success: false, message: err.message });
   }
 };
 
